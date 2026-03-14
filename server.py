@@ -1,5 +1,4 @@
 import os
-import json
 import time
 import yt_dlp
 from werkzeug.utils import secure_filename
@@ -11,7 +10,7 @@ app = Flask(__name__)
 # អនុញ្ញាតអោយ Frontend (APK) ភ្ជាប់មក Server នេះបានដោយមិនមានបញ្ហា Block
 CORS(app) 
 
-print("-> Cloud Lyric-Translator API ដំណើរការ!")
+print("-> Cloud Lyric-Translator API កំពុងដំណើរការយ៉ាងរលូន!")
 
 # ប្រើប្រាស់ /tmp ព្រោះ Cloud Server ឥតគិតថ្លៃភាគច្រើនអនុញ្ញាតអោយ Save ឯកសារតែក្នុងទីនេះទេ
 BASE_DIR = '/tmp/lyric_data'
@@ -19,33 +18,13 @@ MEDIA_DIR = os.path.join(BASE_DIR, 'media')
 os.makedirs(MEDIA_DIR, exist_ok=True)
 
 # ----------------------------------------------------
-# ផ្នែករៀបចំ API Key និង Gemini Models
+# ១. ផ្នែករៀបចំ API Key និង Gemini Models
 # ----------------------------------------------------
 def configure_gemini(api_key):
-    if api_key:
+    if api_key and api_key.startswith("AIza"):
         genai.configure(api_key=api_key)
         return True
     return False
-
-@app.route('/get_models', methods=['POST'])
-def get_models():
-    api_key = request.form.get('api_key', '').strip()
-    default_models = [{"val": "gemini-1.5-pro", "name": "🧠 1.5 Pro"}, {"val": "gemini-1.5-flash", "name": "⚡ 1.5 Flash"}]
-    if not configure_gemini(api_key):
-        return jsonify(default_models)
-    
-    try:
-        models = genai.list_models()
-        valid = []
-        for m in models:
-            name = m.name.lower()
-            if 'generatecontent' in m.supported_generation_methods and 'gemini' in name and 'vision' not in name:
-                clean_val = m.name.replace('models/', '')
-                icon = '🧠' if 'pro' in clean_val else ('🔥' if '2.' in clean_val else '⚡')
-                valid.append({"val": clean_val, "name": f"{icon} {clean_val.replace('gemini-', '')}"})
-        return jsonify(valid if valid else default_models)
-    except:
-        return jsonify(default_models)
 
 @app.route('/check_auth', methods=['POST'])
 def check_auth(): 
@@ -53,17 +32,50 @@ def check_auth():
     if not api_key: 
         return jsonify({'error': "សូមបញ្ចូល API Key!"})
     
-    # 🎯 ក្បួនឆែក Key បែបឆ្លាតវៃ និងលឿនបំផុត (មិនអោយគាំង Server)
-    # គន្លឹះ៖ API Key របស់ Google តែងតែផ្តើមដោយអក្សរ "AIza" ជានិច្ច
+    # ក្បួនឆែកលឿន ០វិនាទី ការពារមិនអោយគាំងពេលចុច Save
     if api_key.startswith("AIza") and len(api_key) > 30:
-        # បើទម្រង់វាត្រូវហើយ យើងអោយវាឆ្លងកាត់យកទៅ Save ក្នុងទូរស័ព្ទតែម្តង (0 វិនាទី)
-        # បើ Key នេះខូចមែន វានឹងទៅលោត Error ប្រាប់នៅពេលបងចុច "បកប្រែ" ជាក់ស្តែង!
         return jsonify({'success': True, 'masked_key': f"{api_key[:8]}...{api_key[-5:]}"})
     else:
         return jsonify({'error': "ទម្រង់ API Key មិនត្រឹមត្រូវទេ! (ជាទូទៅត្រូវផ្តើមដោយ AIza...)"})
 
+@app.route('/get_models', methods=['POST'])
+def get_models():
+    api_key = request.form.get('api_key', '').strip()
+    # ម៉ូឌែលបម្រុងទុក (Fallback) ករណី Google API មានបញ្ហា
+    default_models = [
+        {"val": "gemini-1.5-pro", "name": "🧠 1.5 Pro (ឆ្លាត)"}, 
+        {"val": "gemini-1.5-flash", "name": "⚡ 1.5 Flash (លឿន)"}
+    ]
+    
+    if not configure_gemini(api_key):
+        return jsonify(default_models)
+    
+    try:
+        # ក្បួនទាញយកម៉ូឌែលផ្ទាល់ពី Google ពេលមាន Update ថ្មីវានឹងលោតចូល App ស្វ័យប្រវត្តិ
+        models = genai.list_models()
+        valid_models = []
+        
+        for m in models:
+            name = m.name.lower()
+            methods = [method.lower() for method in m.supported_generation_methods]
+            
+            # ចាប់យកតែម៉ូឌែលណាដែលបម្រើការផ្នែកអត្ថបទ (generateContent) និងមានពាក្យ gemini
+            if 'generatecontent' in methods and 'gemini' in name and 'vision' not in name:
+                clean_val = m.name.replace('models/', '')
+                icon = '🚀' if '2.5' in clean_val else ('🔥' if '2.0' in clean_val else ('🧠' if 'pro' in clean_val else '⚡'))
+                valid_models.append({"val": clean_val, "name": f"{icon} {clean_val.replace('gemini-', '')}"})
+        
+        # រៀបចំម៉ូឌែលពីថ្មីទៅចាស់
+        valid_models.sort(key=lambda x: x['val'], reverse=True)
+        return jsonify(valid_models if valid_models else default_models)
+        
+    except Exception as e:
+        print(f"Error fetching models: {str(e)}")
+        # បើ Internet គាំង វាបង្ហាញម៉ូឌែល Default វិញ មិនអោយ App គាំងស្ងាត់ជ្រាបទេ
+        return jsonify(default_models)
+
 # ----------------------------------------------------
-# ផ្នែកទាញយក និង Upload ឯកសារ
+# ២. ផ្នែកទាញយក និង Upload ឯកសារ
 # ----------------------------------------------------
 @app.route('/download_media', methods=['POST'])
 def download_media():
@@ -76,7 +88,7 @@ def download_media():
         timestamp = str(int(time.time()))
         out_template = os.path.join(MEDIA_DIR, f'audio_{timestamp}.%(ext)s')
         
-        # 🎯 ក្បួនបន្លំខ្លួន + ប្រើសំបុត្រ VIP (Cookies)
+        # ក្បួនបន្លំខ្លួន + ប្រើសំបុត្រ VIP (Cookies) ការពារ YouTube Block
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': out_template,
@@ -122,7 +134,7 @@ def serve_media(filename):
     return send_file(os.path.join(MEDIA_DIR, filename))
 
 # ----------------------------------------------------
-# ផ្នែកខួរក្បាលបកប្រែ AI 
+# ៣. ផ្នែកខួរក្បាលបកប្រែ AI (ស្នូលដ៏អស្ចារ្យ)
 # ----------------------------------------------------
 @app.route('/translate_lyrics', methods=['POST'])
 def translate_lyrics():
@@ -177,7 +189,7 @@ def translate_lyrics():
             if os.path.exists(file_path):
                 uploaded_media = genai.upload_file(path=file_path)
                 
-                # 🎯 [ចំណុចសំខាន់បំផុត] ក្បួនរង់ចាំ Gemini អាន File អោយចប់សិន ទើបមិន Error
+                # ក្បួនរង់ចាំ Gemini អាន File អោយចប់សិន ទើបមិន Error
                 while uploaded_media.state.name == "PROCESSING":
                     time.sleep(2)
                     uploaded_media = genai.get_file(uploaded_media.name)
