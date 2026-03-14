@@ -21,8 +21,6 @@ os.makedirs(MEDIA_DIR, exist_ok=True)
 # ----------------------------------------------------
 # ផ្នែករៀបចំ API Key និង Gemini Models
 # ----------------------------------------------------
-# នៅក្នុង Cloud យើងមិន Save Key ចូល File ទេ ព្រោះវាជា Public Server 
-# គឺយើងនឹងទទួល Key ពី Frontend (APK) រាល់ពេលមានការ Request ម្តងៗ
 def configure_gemini(api_key):
     if api_key:
         genai.configure(api_key=api_key)
@@ -41,7 +39,7 @@ def get_models():
         valid = []
         for m in models:
             name = m.name.lower()
-            if 'generateContent' in m.supported_generation_methods and 'gemini' in name and 'vision' not in name:
+            if 'generatecontent' in m.supported_generation_methods and 'gemini' in name and 'vision' not in name:
                 clean_val = m.name.replace('models/', '')
                 icon = '🧠' if 'pro' in clean_val else ('🔥' if '2.' in clean_val else '⚡')
                 valid.append({"val": clean_val, "name": f"{icon} {clean_val.replace('gemini-', '')}"})
@@ -52,13 +50,15 @@ def get_models():
 @app.route('/check_auth', methods=['POST'])
 def check_auth(): 
     api_key = request.form.get('api_key', '').strip()
+    if not api_key: return jsonify({'error': "សូមបញ្ចូល API Key!"})
     try:
-        if api_key:
-            genai.configure(api_key=api_key)
-            genai.list_models() # Test key
-            return jsonify({'success': True, 'masked_key': f"{api_key[:8]}...{api_key[-5:]}"})
-    except: pass
-    return jsonify({'error': "API Key មិនត្រឹមត្រូវ!"})
+        genai.configure(api_key=api_key)
+        # 🎯 ប្រើវិធីនេះលឿនជាង និងមិនគាំង Server 
+        genai.get_model('models/gemini-1.5-flash') 
+        return jsonify({'success': True, 'masked_key': f"{api_key[:8]}...{api_key[-5:]}"})
+    except Exception as e: 
+        print(f"Auth Error: {str(e)}")
+        return jsonify({'error': "API Key មិនត្រឹមត្រូវ ឬខូចហើយ!"})
 
 # ----------------------------------------------------
 # ផ្នែកទាញយក និង Upload ឯកសារ
@@ -80,7 +80,7 @@ def download_media():
             'outtmpl': out_template,
             'quiet': True,
             'nocheckcertificate': True,
-            'cookiefile': 'cookies.txt',  # 👈 ថែមកូដមួយជួរនេះចូលដើម្បីហៅ File មកប្រើ
+            'cookiefile': 'cookies.txt',  
             'extractor_args': {'youtube': ['player_client=android']}, 
             'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         }
@@ -94,7 +94,7 @@ def download_media():
     except Exception as e:
         err_msg = str(e)
         if "bot" in err_msg.lower() or "sign in" in err_msg.lower():
-            return jsonify({'error': "⚠️ YouTube កំពុងបិទ (Block) Server មិនអោយទាញយកបណ្ដោះអាសន្ន។ សូមបងទាញយក MP3 ពីក្រៅ រួចប្រើប៊ូតុង [📁 ឯកសារ] ជំនួសសិនចុះបង!"})
+            return jsonify({'error': "⚠️ YouTube កំពុងបិទ (Block) Server មិនអោយទាញយកបណ្ដោះអាសន្ន។ សូមប្រើប៊ូតុង [📁 ឯកសារ] សិនចុះបង!"})
         return jsonify({'error': f"មិនអាចទាញយកបានទេ: {err_msg}"})
 
 @app.route('/upload_media', methods=['POST'])
@@ -120,7 +120,7 @@ def serve_media(filename):
     return send_file(os.path.join(MEDIA_DIR, filename))
 
 # ----------------------------------------------------
-# ផ្នែកខួរក្បាលបកប្រែ AI (ស្នូលដ៏អស្ចារ្យរក្សាទុកដដែល)
+# ផ្នែកខួរក្បាលបកប្រែ AI 
 # ----------------------------------------------------
 @app.route('/translate_lyrics', methods=['POST'])
 def translate_lyrics():
@@ -174,6 +174,15 @@ def translate_lyrics():
             file_path = os.path.join(MEDIA_DIR, media_filename)
             if os.path.exists(file_path):
                 uploaded_media = genai.upload_file(path=file_path)
+                
+                # 🎯 [ចំណុចសំខាន់បំផុត] ក្បួនរង់ចាំ Gemini អាន File អោយចប់សិន ទើបមិន Error
+                while uploaded_media.state.name == "PROCESSING":
+                    time.sleep(2)
+                    uploaded_media = genai.get_file(uploaded_media.name)
+                    
+                if uploaded_media.state.name == "FAILED":
+                    return jsonify({'error': "⚠️ AI មិនអាចអានឯកសារនេះបានទេ!"})
+                    
                 contents.append(uploaded_media)
         
         if text_content:
@@ -200,6 +209,5 @@ def translate_lyrics():
 # បើករត់ Server សម្រាប់ Cloud
 # ----------------------------------------------------
 if __name__ == '__main__':
-    # Cloud providers (ដូចជា Render) នឹងបោះ PORT មកអោយ បើអត់មានវាប្រើ 5000
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
