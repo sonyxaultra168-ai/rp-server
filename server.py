@@ -76,7 +76,7 @@ def get_models():
         return jsonify(default_models)
 
 # ----------------------------------------------------
-# ២. ផ្នែកទាញយក និង Upload ឯកសារ (ប្រើ Cookies ឡើងវិញ)
+# ២. ផ្នែកទាញយក និង Upload ឯកសារ (អាប់ដេតដោះសោរ Format)
 # ----------------------------------------------------
 @app.route('/download_media', methods=['POST'])
 def download_media():
@@ -90,14 +90,13 @@ def download_media():
         timestamp = str(int(time.time()))
         out_template = os.path.join(MEDIA_DIR, f'audio_{timestamp}.%(ext)s')
         
-        # 🎯 ក្បួនប្រើសំបុត្រ VIP (cookies.txt) យកមកវិញ
+        # 🎯 ក្បួនថ្មី៖ ដកការបន្លំជា Android ចេញ និងបើកទូលាយអោយទាញយក Format ណាដែលមាន
         ydl_opts = {
-            'format': 'bestaudio/best',
+            'format': 'm4a/bestaudio/best', # យក m4a ឬ Best Audio បើអត់មានទេ យក Best ធម្មតា
             'outtmpl': out_template,
             'quiet': True,
             'nocheckcertificate': True,
-            'cookiefile': 'cookies.txt',  # 👈 ទាមទារអោយមាន File នេះក្នុង GitHub
-            'extractor_args': {'youtube': ['player_client=android']}, 
+            'cookiefile': 'cookies.txt',    # អាស្រ័យលើ Cookie សុទ្ធសាធ
             'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         }
         
@@ -113,7 +112,6 @@ def download_media():
         err_msg = str(e).lower()
         print(f"YT-DLP Error: {err_msg}")
         
-        # ចាប់ Error អោយចំៗ បើមកពី Cookies ខូចអោយវាលោតប្រាប់
         if "bot" in err_msg or "sign in" in err_msg or "cookie" in err_msg:
             return jsonify({'error': "⚠️ YouTube រារាំង! សូមទាញយកឯកសារ cookies.txt ថ្មីពីកុំព្យូទ័រ យកទៅ Update ក្នុង GitHub (Cookies ចាស់ប្រហែលផុតកំណត់)។"})
             
