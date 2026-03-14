@@ -1,5 +1,8 @@
 import os
 import time
+import urllib.request
+import urllib.parse
+import json
 import yt_dlp
 from werkzeug.utils import secure_filename
 from flask import Flask, request, jsonify, send_file
@@ -10,9 +13,8 @@ app = Flask(__name__)
 # អនុញ្ញាតអោយ Frontend (APK) ភ្ជាប់មក Server នេះបានដោយមិនមានបញ្ហា Block
 CORS(app) 
 
-print("-> Cloud Lyric-Translator API កំពុងដំណើរការយ៉ាងរលូន!")
+print("-> Cloud Lyric-Translator API កំពុងដំណើរការ!")
 
-# ប្រើប្រាស់ /tmp ព្រោះ Cloud Server ឥតគិតថ្លៃភាគច្រើនអនុញ្ញាតអោយ Save ឯកសារតែក្នុងទីនេះទេ
 BASE_DIR = '/tmp/lyric_data'
 MEDIA_DIR = os.path.join(BASE_DIR, 'media')
 os.makedirs(MEDIA_DIR, exist_ok=True)
@@ -29,10 +31,8 @@ def configure_gemini(api_key):
 @app.route('/check_auth', methods=['POST'])
 def check_auth(): 
     api_key = request.form.get('api_key', '').strip()
-    if not api_key: 
-        return jsonify({'error': "សូមបញ្ចូល API Key!"})
+    if not api_key: return jsonify({'error': "សូមបញ្ចូល API Key!"})
     
-    # ក្បួនឆែកលឿន ០វិនាទី ការពារមិនអោយគាំងពេលចុច Save
     if api_key.startswith("AIza") and len(api_key) > 30:
         return jsonify({'success': True, 'masked_key': f"{api_key[:8]}...{api_key[-5:]}"})
     else:
@@ -41,37 +41,38 @@ def check_auth():
 @app.route('/get_models', methods=['POST'])
 def get_models():
     api_key = request.form.get('api_key', '').strip()
-    # ម៉ូឌែលបម្រុងទុក (Fallback) ករណី Google API មានបញ្ហា
-    default_models = [
-        {"val": "gemini-1.5-pro", "name": "🧠 1.5 Pro (ឆ្លាត)"}, 
-        {"val": "gemini-1.5-flash", "name": "⚡ 1.5 Flash (លឿន)"}
-    ]
+    default_models = [{"val": "gemini-2.5-flash", "name": "⚡ 2.5 Flash (លឿន-អត់គាំង)"}]
     
-    if not configure_gemini(api_key):
-        return jsonify(default_models)
+    if not configure_gemini(api_key): return jsonify(default_models)
     
     try:
-        # ក្បួនទាញយកម៉ូឌែលផ្ទាល់ពី Google ពេលមាន Update ថ្មីវានឹងលោតចូល App ស្វ័យប្រវត្តិ
         models = genai.list_models()
         valid_models = []
-        
         for m in models:
             name = m.name.lower()
             methods = [method.lower() for method in m.supported_generation_methods]
             
-            # ចាប់យកតែម៉ូឌែលណាដែលបម្រើការផ្នែកអត្ថបទ (generateContent) និងមានពាក្យ gemini
-            if 'generatecontent' in methods and 'gemini' in name and 'vision' not in name:
+            # យកតែ text-generation មិនយក vision, robotics, លាយឡំទេ
+            if 'generatecontent' in methods and 'gemini' in name:
+                if any(x in name for x in ['vision', 'robotics', 'learnmath', 'embedding', 'aqa']):
+                    continue
+                    
                 clean_val = m.name.replace('models/', '')
-                icon = '🚀' if '2.5' in clean_val else ('🔥' if '2.0' in clean_val else ('🧠' if 'pro' in clean_val else '⚡'))
-                valid_models.append({"val": clean_val, "name": f"{icon} {clean_val.replace('gemini-', '')}"})
+                
+                # 🎯 ដាក់ឈ្មោះអោយស្រួលចំណាំ ការពារការរើសខុសនាំអោយ Timeout
+                if 'flash' in clean_val:
+                    display_name = f"⚡ {clean_val.replace('gemini-', '')} (លឿន-អត់គាំង)"
+                elif 'pro' in clean_val:
+                    display_name = f"🧠 {clean_val.replace('gemini-', '')} (ឆ្លាត-អាចគាំង)"
+                else:
+                    display_name = f"🤖 {clean_val.replace('gemini-', '')}"
+                    
+                valid_models.append({"val": clean_val, "name": display_name})
         
-        # រៀបចំម៉ូឌែលពីថ្មីទៅចាស់
         valid_models.sort(key=lambda x: x['val'], reverse=True)
         return jsonify(valid_models if valid_models else default_models)
-        
     except Exception as e:
         print(f"Error fetching models: {str(e)}")
-        # បើ Internet គាំង វាបង្ហាញម៉ូឌែល Default វិញ មិនអោយ App គាំងស្ងាត់ជ្រាបទេ
         return jsonify(default_models)
 
 # ----------------------------------------------------
@@ -81,35 +82,48 @@ def get_models():
 def download_media():
     url = request.form.get('url', '').strip()
     if not url: return jsonify({'error': 'សូមបញ្ចូល URL!'})
+    
     try:
-        # លុបឯកសារចាស់ៗ
         for f in os.listdir(MEDIA_DIR): os.remove(os.path.join(MEDIA_DIR, f))
-        
         timestamp = str(int(time.time()))
-        out_template = os.path.join(MEDIA_DIR, f'audio_{timestamp}.%(ext)s')
         
-        # ក្បួនបន្លំខ្លួន + ប្រើសំបុត្រ VIP (Cookies) ការពារ YouTube Block
+        try:
+            req = urllib.request.Request(
+                'https://api.cobalt.tools/api/json',
+                data=json.dumps({"url": url, "isAudioOnly": True}).encode('utf-8'),
+                headers={'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'}
+            )
+            with urllib.request.urlopen(req) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                download_url = res_data.get('url')
+                
+                if download_url:
+                    file_name = f"audio_{timestamp}.mp3"
+                    out_template = os.path.join(MEDIA_DIR, file_name)
+                    req_dl = urllib.request.Request(download_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req_dl) as dl_response, open(out_template, 'wb') as out_file:
+                        out_file.write(dl_response.read())
+                    return jsonify({'success': True, 'file_name': file_name, 'title': "YouTube Audio", 'type': 'audio'})
+        except Exception as api_err:
+            pass 
+
+        out_template = os.path.join(MEDIA_DIR, f'audio_{timestamp}.%(ext)s')
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': out_template,
             'quiet': True,
             'nocheckcertificate': True,
-            'cookiefile': 'cookies.txt',  
-            'extractor_args': {'youtube': ['player_client=android']}, 
-            'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            'extractor_args': {'youtube': ['player_client=android']}
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             title = info.get('title', 'Unknown Song')
             ext = info.get('ext', 'm4a')
+            file_name = f"audio_{timestamp}.{ext}"
+            return jsonify({'success': True, 'file_name': file_name, 'title': title, 'type': 'audio'})
             
-        file_name = f"audio_{timestamp}.{ext}"
-        return jsonify({'success': True, 'file_name': file_name, 'title': title, 'type': 'audio'})
     except Exception as e:
-        err_msg = str(e)
-        if "bot" in err_msg.lower() or "sign in" in err_msg.lower():
-            return jsonify({'error': "⚠️ YouTube កំពុងបិទ (Block) Server មិនអោយទាញយកបណ្ដោះអាសន្ន។ សូមប្រើប៊ូតុង [📁 ឯកសារ] សិនចុះបង!"})
-        return jsonify({'error': f"មិនអាចទាញយកបានទេ: {err_msg}"})
+        return jsonify({'error': "⚠️ មិនអាចទាញយកបានទេ! YouTube កំពុងរារាំង។ សូមប្រើប៊ូតុង [📁 ឯកសារ] សិនចុះបង!"})
 
 @app.route('/upload_media', methods=['POST'])
 def upload_media():
@@ -134,14 +148,14 @@ def serve_media(filename):
     return send_file(os.path.join(MEDIA_DIR, filename))
 
 # ----------------------------------------------------
-# ៣. ផ្នែកខួរក្បាលបកប្រែ AI (ស្នូលដ៏អស្ចារ្យ)
+# ៣. ផ្នែកខួរក្បាលបកប្រែ AI 
 # ----------------------------------------------------
 @app.route('/translate_lyrics', methods=['POST'])
 def translate_lyrics():
     api_key = request.form.get('api_key', '').strip()
     text_content = request.form.get('text', '').strip()
     media_filename = request.form.get('media_file', '').strip()
-    gemini_model = request.form.get('gemini_model', 'gemini-1.5-pro') 
+    gemini_model = request.form.get('gemini_model', 'gemini-2.5-flash') 
 
     if not configure_gemini(api_key): return jsonify({'error': 'សូមបញ្ចូល API Key ជាមុនសិន!'})
     if not text_content and not media_filename: return jsonify({'error': 'សូមបញ្ចូលអត្ថបទចម្រៀង ឬ Media!'})
@@ -189,7 +203,6 @@ def translate_lyrics():
             if os.path.exists(file_path):
                 uploaded_media = genai.upload_file(path=file_path)
                 
-                # ក្បួនរង់ចាំ Gemini អាន File អោយចប់សិន ទើបមិន Error
                 while uploaded_media.state.name == "PROCESSING":
                     time.sleep(2)
                     uploaded_media = genai.get_file(uploaded_media.name)
@@ -216,12 +229,9 @@ def translate_lyrics():
         friendly_error = f"មានបញ្ហាបច្ចេកទេស: {str(e)}"
         if "quota" in error_msg or "429" in error_msg: friendly_error = "⚠️ អស់កូតាប្រើប្រាស់ហើយ!"
         elif "api_key" in error_msg or "400" in error_msg: friendly_error = "🔑 API Key មិនត្រឹមត្រូវ!"
-        elif "timeout" in error_msg: friendly_error = "⏳ ម៉ាស៊ីនគិតយូរពេក (Timeout)។"
+        elif "timeout" in error_msg: friendly_error = "⏳ ម៉ាស៊ីនគិតយូរពេក (Timeout)។ សូមជ្រើសរើសម៉ូឌែលដែលមានអក្សរ (លឿន-អត់គាំង) ជំនួសវិញ!"
         return jsonify({'error': friendly_error})
 
-# ----------------------------------------------------
-# បើករត់ Server សម្រាប់ Cloud
-# ----------------------------------------------------
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
