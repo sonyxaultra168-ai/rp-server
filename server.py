@@ -74,13 +74,14 @@ def download_media():
         timestamp = str(int(time.time()))
         out_template = os.path.join(MEDIA_DIR, f'audio_{timestamp}.%(ext)s')
         
-        # 🎯 ក្បួនបន្លំខ្លួន (Bypass Bot Block): ប្រាប់ YouTube ថាជា Android Client
+        # 🎯 ក្បួនបន្លំខ្លួន + ប្រើសំបុត្រ VIP (Cookies)
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': out_template,
             'quiet': True,
             'nocheckcertificate': True,
-            'extractor_args': {'youtube': ['player_client=android']}, # បន្លំជាទូរស័ព្ទ
+            'cookiefile': 'cookies.txt',  # 👈 ថែមកូដមួយជួរនេះចូលដើម្បីហៅ File មកប្រើ
+            'extractor_args': {'youtube': ['player_client=android']}, 
             'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
