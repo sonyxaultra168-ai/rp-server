@@ -76,7 +76,7 @@ def get_models():
         return jsonify(default_models)
 
 # ----------------------------------------------------
-# ២. ផ្នែកទាញយក និង Upload ឯកសារ
+# ២. ផ្នែកទាញយក និង Upload ឯកសារ (ប្រើ Cookies ឡើងវិញ)
 # ----------------------------------------------------
 @app.route('/download_media', methods=['POST'])
 def download_media():
@@ -84,46 +84,40 @@ def download_media():
     if not url: return jsonify({'error': 'សូមបញ្ចូល URL!'})
     
     try:
+        # លុបឯកសារចាស់ៗដើម្បីកុំអោយពេញ Server
         for f in os.listdir(MEDIA_DIR): os.remove(os.path.join(MEDIA_DIR, f))
-        timestamp = str(int(time.time()))
         
-        try:
-            req = urllib.request.Request(
-                'https://api.cobalt.tools/api/json',
-                data=json.dumps({"url": url, "isAudioOnly": True}).encode('utf-8'),
-                headers={'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'}
-            )
-            with urllib.request.urlopen(req) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                download_url = res_data.get('url')
-                
-                if download_url:
-                    file_name = f"audio_{timestamp}.mp3"
-                    out_template = os.path.join(MEDIA_DIR, file_name)
-                    req_dl = urllib.request.Request(download_url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req_dl) as dl_response, open(out_template, 'wb') as out_file:
-                        out_file.write(dl_response.read())
-                    return jsonify({'success': True, 'file_name': file_name, 'title': "YouTube Audio", 'type': 'audio'})
-        except Exception as api_err:
-            pass 
-
+        timestamp = str(int(time.time()))
         out_template = os.path.join(MEDIA_DIR, f'audio_{timestamp}.%(ext)s')
+        
+        # 🎯 ក្បួនប្រើសំបុត្រ VIP (cookies.txt) យកមកវិញ
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': out_template,
             'quiet': True,
             'nocheckcertificate': True,
-            'extractor_args': {'youtube': ['player_client=android']}
+            'cookiefile': 'cookies.txt',  # 👈 ទាមទារអោយមាន File នេះក្នុង GitHub
+            'extractor_args': {'youtube': ['player_client=android']}, 
+            'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         }
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             title = info.get('title', 'Unknown Song')
             ext = info.get('ext', 'm4a')
-            file_name = f"audio_{timestamp}.{ext}"
-            return jsonify({'success': True, 'file_name': file_name, 'title': title, 'type': 'audio'})
             
+        file_name = f"audio_{timestamp}.{ext}"
+        return jsonify({'success': True, 'file_name': file_name, 'title': title, 'type': 'audio'})
+        
     except Exception as e:
-        return jsonify({'error': "⚠️ មិនអាចទាញយកបានទេ! YouTube កំពុងរារាំង។ សូមប្រើប៊ូតុង [📁 ឯកសារ] សិនចុះបង!"})
+        err_msg = str(e).lower()
+        print(f"YT-DLP Error: {err_msg}")
+        
+        # ចាប់ Error អោយចំៗ បើមកពី Cookies ខូចអោយវាលោតប្រាប់
+        if "bot" in err_msg or "sign in" in err_msg or "cookie" in err_msg:
+            return jsonify({'error': "⚠️ YouTube រារាំង! សូមទាញយកឯកសារ cookies.txt ថ្មីពីកុំព្យូទ័រ យកទៅ Update ក្នុង GitHub (Cookies ចាស់ប្រហែលផុតកំណត់)។"})
+            
+        return jsonify({'error': f"មិនអាចទាញយកបានទេ: {str(e)}"})
 
 @app.route('/upload_media', methods=['POST'])
 def upload_media():
