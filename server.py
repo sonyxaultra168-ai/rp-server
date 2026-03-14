@@ -68,19 +68,20 @@ def download_media():
     url = request.form.get('url', '').strip()
     if not url: return jsonify({'error': 'សូមបញ្ចូល URL!'})
     try:
-        # លុបឯកសារចាស់ៗចោលកុំអោយពេញ Server
+        # លុបឯកសារចាស់ៗ
         for f in os.listdir(MEDIA_DIR): os.remove(os.path.join(MEDIA_DIR, f))
         
         timestamp = str(int(time.time()))
         out_template = os.path.join(MEDIA_DIR, f'audio_{timestamp}.%(ext)s')
         
-        # Cloud Optimization: ទាញយកតែសម្លេង (m4a/webm) មិនបាច់ Convert ជា MP3 ទេ ដើម្បីកុំអោយ Server គាំង 
-        # (Gemini អាចស្តាប់ m4a និង webm បានយ៉ាងល្អ)
+        # 🎯 ក្បួនបន្លំខ្លួន (Bypass Bot Block): ប្រាប់ YouTube ថាជា Android Client
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': out_template,
             'quiet': True,
-            'nocheckcertificate': True
+            'nocheckcertificate': True,
+            'extractor_args': {'youtube': ['player_client=android']}, # បន្លំជាទូរស័ព្ទ
+            'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -90,7 +91,10 @@ def download_media():
         file_name = f"audio_{timestamp}.{ext}"
         return jsonify({'success': True, 'file_name': file_name, 'title': title, 'type': 'audio'})
     except Exception as e:
-        return jsonify({'error': f"មិនអាចទាញយកបានទេ: {str(e)}"})
+        err_msg = str(e)
+        if "bot" in err_msg.lower() or "sign in" in err_msg.lower():
+            return jsonify({'error': "⚠️ YouTube កំពុងបិទ (Block) Server មិនអោយទាញយកបណ្ដោះអាសន្ន។ សូមបងទាញយក MP3 ពីក្រៅ រួចប្រើប៊ូតុង [📁 ឯកសារ] ជំនួសសិនចុះបង!"})
+        return jsonify({'error': f"មិនអាចទាញយកបានទេ: {err_msg}"})
 
 @app.route('/upload_media', methods=['POST'])
 def upload_media():
