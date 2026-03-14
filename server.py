@@ -50,15 +50,17 @@ def get_models():
 @app.route('/check_auth', methods=['POST'])
 def check_auth(): 
     api_key = request.form.get('api_key', '').strip()
-    if not api_key: return jsonify({'error': "សូមបញ្ចូល API Key!"})
-    try:
-        genai.configure(api_key=api_key)
-        # 🎯 ប្រើវិធីនេះលឿនជាង និងមិនគាំង Server 
-        genai.get_model('models/gemini-1.5-flash') 
+    if not api_key: 
+        return jsonify({'error': "សូមបញ្ចូល API Key!"})
+    
+    # 🎯 ក្បួនឆែក Key បែបឆ្លាតវៃ និងលឿនបំផុត (មិនអោយគាំង Server)
+    # គន្លឹះ៖ API Key របស់ Google តែងតែផ្តើមដោយអក្សរ "AIza" ជានិច្ច
+    if api_key.startswith("AIza") and len(api_key) > 30:
+        # បើទម្រង់វាត្រូវហើយ យើងអោយវាឆ្លងកាត់យកទៅ Save ក្នុងទូរស័ព្ទតែម្តង (0 វិនាទី)
+        # បើ Key នេះខូចមែន វានឹងទៅលោត Error ប្រាប់នៅពេលបងចុច "បកប្រែ" ជាក់ស្តែង!
         return jsonify({'success': True, 'masked_key': f"{api_key[:8]}...{api_key[-5:]}"})
-    except Exception as e: 
-        print(f"Auth Error: {str(e)}")
-        return jsonify({'error': "API Key មិនត្រឹមត្រូវ ឬខូចហើយ!"})
+    else:
+        return jsonify({'error': "ទម្រង់ API Key មិនត្រឹមត្រូវទេ! (ជាទូទៅត្រូវផ្តើមដោយ AIza...)"})
 
 # ----------------------------------------------------
 # ផ្នែកទាញយក និង Upload ឯកសារ
