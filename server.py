@@ -52,64 +52,54 @@ def get_models():
         return jsonify(valid_models if valid_models else default_models)
     except: return jsonify(default_models)
 
-# ----------------------------------------------------
-# ២. ផ្នែកទាញយក MP3 (យុទ្ធសាស្ត្រវាយលុកគ្រប់ច្រក)
-# ----------------------------------------------------
 @app.route('/download_media', methods=['POST'])
 def download_media():
     url = request.form.get('url', '').strip()
-    if not url: return jsonify({'error': 'សូមបញ្ចូល URL!'})
+    if not url: return jsonify({'error': 'សូមបញ្ចូលលីង (URL)!'})
     
     try:
+        # លុបឯកសារចាស់ៗ
         for f in os.listdir(MEDIA_DIR): os.remove(os.path.join(MEDIA_DIR, f))
         timestamp = str(int(time.time()))
-        file_name = f"audio_{timestamp}.mp3"
-        out_path = os.path.join(MEDIA_DIR, file_name)
-
-        # 🎯 ច្រកទី ១៖ ប្រើ Cobalt API (ជាមួយ Rotating Instances)
-        api_instances = [
-            'https://api.cobalt.tools/api/json',
-            'https://cobalt.shizuku.io/api/json',
-            'https://api.cobalt.best/api/json'
-        ]
         
-        for api_url in api_instances:
-            try:
-                print(f"កំពុងព្យាយាមប្រើ API: {api_url}")
-                req = urllib.request.Request(
-                    api_url,
-                    data=json.dumps({"url": url, "isAudioOnly": True, "audioFormat": "mp3"}).encode('utf-8'),
-                    headers={'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'}
-                )
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    res_data = json.loads(response.read().decode('utf-8'))
-                    dl_link = res_data.get('url')
-                    if dl_link:
-                        # ទាញយកពី Link ដែលគេបោះអោយ
-                        urllib.request.urlretrieve(dl_link, out_path)
-                        return jsonify({'success': True, 'file_name': file_name, 'title': "YT Audio", 'type': 'audio'})
-            except: continue # បើអាមួយគាំង លោតទៅអាមួយទៀត
-
-        # 🎯 ច្រកទី ២៖ ប្រើ yt-dlp ជាមួយល្បិចបន្លំជា Browser ពិតប្រាកដ (No Cookies)
-        try:
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': out_path.replace('.mp3', '.%(ext)s'),
-                'quiet': True,
-                'nocheckcertificate': True,
-                'extractor_args': {'youtube': {'player_client': ['web', 'ios']}},
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        # 🎯 ក្បួនទាញយកសកល (Universal Downloader)
+        # កូដនេះនឹងស្វែងរក Format សម្លេងដែលល្អបំផុតដោយស្វ័យប្រវត្តិ
+        ydl_opts = {
+            'format': 'bestaudio/best', 
+            'outtmpl': os.path.join(MEDIA_DIR, f'audio_{timestamp}.%(ext)s'),
+            'quiet': True,
+            'nocheckcertificate': True,
+            'noplaylist': True,
+            # បន្ថែម Header ដើម្បីបន្លំខ្លួនជា Browser ពិតប្រាកដ ការពារ FB/TikTok Block
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Referer': 'https://www.google.com/',
             }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                # រកឈ្មោះឯកសារដែលវាទាញបានពិតប្រាកដ
-                actual_ext = info.get('ext', 'm4a')
-                actual_name = f"audio_{timestamp}.{actual_ext}"
-                return jsonify({'success': True, 'file_name': actual_name, 'title': info.get('title', 'Audio'), 'type': 'audio'})
-        except Exception as e:
-            print(f"yt-dlp failed: {str(e)}")
-
-        return jsonify({'error': "⚠️ យូធូបរឹងមាំពេក! ម៉ាស៊ីន Free របស់ Render ត្រូវបានគេប្លុក IP។ សូមបងទាញ MP3 រួចប្រើប៊ូតុង [📁 ឯកសារ] ជំនួសវិញចុះបង!"})
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get('title', 'Media File')
+            ext = info.get('ext', 'm4a')
+            
+        file_name = f"audio_{timestamp}.{ext}"
+        return jsonify({
+            'success': True, 
+            'file_name': file_name, 
+            'title': title, 
+            'type': 'audio'
+        })
+        
+    except Exception as e:
+        err_msg = str(e).lower()
+        print(f"Download Error: {err_msg}")
+        
+        # បើទាញមិនកើត ប្រាប់អ្នកប្រើប្រាស់អោយចំៗ
+        if "forbidden" in err_msg or "confirm your age" in err_msg:
+            return jsonify({'error': "⚠️ វេបសាយនេះបានរារាំង Server! សូមទាញយក MP3 រួចប្រើប៊ូតុង [📁 ឯកសារ] ជំនួសវិញ។"})
+        
+        return jsonify({'error': f"មិនអាចទាញយកបានទេ៖ អាចមកពីលីងខុស ឬវេបសាយបិទសិទ្ធិ។"})
 
     except Exception as e:
         return jsonify({'error': f"Error: {str(e)}"})
