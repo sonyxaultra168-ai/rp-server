@@ -76,7 +76,7 @@ def get_models():
         return jsonify(default_models)
 
 # ----------------------------------------------------
-# ២. ផ្នែកទាញយក និង Upload ឯកសារ (អាប់ដេតដោះសោរ Format)
+# ២. ផ្នែកទាញយក និង Upload ឯកសារ (The Master Bypass)
 # ----------------------------------------------------
 @app.route('/download_media', methods=['POST'])
 def download_media():
@@ -84,19 +84,51 @@ def download_media():
     if not url: return jsonify({'error': 'សូមបញ្ចូល URL!'})
     
     try:
-        # លុបឯកសារចាស់ៗដើម្បីកុំអោយពេញ Server
+        # លុបឯកសារចាស់ៗ
         for f in os.listdir(MEDIA_DIR): os.remove(os.path.join(MEDIA_DIR, f))
-        
         timestamp = str(int(time.time()))
-        out_template = os.path.join(MEDIA_DIR, f'audio_{timestamp}.%(ext)s')
         
-        # 🎯 ក្បួនថ្មី៖ ដកការបន្លំជា Android ចេញ និងបើកទូលាយអោយទាញយក Format ណាដែលមាន
+        # 🎯 ផ្លូវទី ១៖ ពឹងអ្នកទី ៣ (Cobalt API) ដែលមាន Server ខ្លាំង
+        # ល្បិច៖ ត្រូវដាក់ Origin និង Referer អោយដូចវេបសាយគេពិតៗ ទើបគេអោយទាញយក
+        try:
+            import urllib.request
+            import urllib.parse
+            import json
+            
+            req = urllib.request.Request(
+                'https://api.cobalt.tools/api/json',
+                data=json.dumps({"url": url, "isAudioOnly": True}).encode('utf-8'),
+                headers={
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                    'Origin': 'https://cobalt.tools',
+                    'Referer': 'https://cobalt.tools/'
+                }
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                download_url = res_data.get('url')
+                
+                if download_url:
+                    file_name = f"audio_{timestamp}.mp3"
+                    out_template = os.path.join(MEDIA_DIR, file_name)
+                    req_dl = urllib.request.Request(download_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req_dl, timeout=30) as dl_response, open(out_template, 'wb') as out_file:
+                        out_file.write(dl_response.read())
+                    return jsonify({'success': True, 'file_name': file_name, 'title': "YouTube Audio", 'type': 'audio'})
+        except Exception as cobalt_err:
+            print(f"Cobalt Failed: {cobalt_err}")
+
+        # 🎯 ផ្លូវទី ២៖ ប្រើ yt-dlp (លុប Cookie ចេញ កុំអោយលោតប្រទេស)
+        # ល្បិចថ្មី៖ បន្លំជាទូរទស្សន៍ (TV) ឬ iOS ជំនួសអោយ Android/Web ព្រោះ YouTube មិនសូវ Block TV ទេ
+        out_template_yt = os.path.join(MEDIA_DIR, f'audio_{timestamp}.%(ext)s')
         ydl_opts = {
-            'format': 'm4a/bestaudio/best', # យក m4a ឬ Best Audio បើអត់មានទេ យក Best ធម្មតា
-            'outtmpl': out_template,
+            'format': 'm4a/bestaudio/best',
+            'outtmpl': out_template_yt,
             'quiet': True,
             'nocheckcertificate': True,
-            'cookiefile': 'cookies.txt',    # អាស្រ័យលើ Cookie សុទ្ធសាធ
+            'extractor_args': {'youtube': ['player_client=tv,ios']}, 
             'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         }
         
@@ -105,17 +137,13 @@ def download_media():
             title = info.get('title', 'Unknown Song')
             ext = info.get('ext', 'm4a')
             
-        file_name = f"audio_{timestamp}.{ext}"
-        return jsonify({'success': True, 'file_name': file_name, 'title': title, 'type': 'audio'})
+        file_name_yt = f"audio_{timestamp}.{ext}"
+        return jsonify({'success': True, 'file_name': file_name_yt, 'title': title, 'type': 'audio'})
         
     except Exception as e:
         err_msg = str(e).lower()
         print(f"YT-DLP Error: {err_msg}")
-        
-        if "bot" in err_msg or "sign in" in err_msg or "cookie" in err_msg:
-            return jsonify({'error': "⚠️ YouTube រារាំង! សូមទាញយកឯកសារ cookies.txt ថ្មីពីកុំព្យូទ័រ យកទៅ Update ក្នុង GitHub (Cookies ចាស់ប្រហែលផុតកំណត់)។"})
-            
-        return jsonify({'error': f"មិនអាចទាញយកបានទេ: {str(e)}"})
+        return jsonify({'error': "⚠️ យូធូបបិទ Server Free មិនឱ្យទាញយកទេ! សូមទាញ MP3 ពីក្រៅរួចប្រើប៊ូតុង [📁 ឯកសារ] សិនចុះ!"})
 
 @app.route('/upload_media', methods=['POST'])
 def upload_media():
